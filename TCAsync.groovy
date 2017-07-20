@@ -164,7 +164,7 @@ def asyncResponse(response, data) {
                 case "0": //Successful Command
                 case "4500": //Successful Command for Arm Action
                     state.tokenRefresh = now() //we ran a successful command, that will keep the token alive
-
+		    state.loginRetry = 0
                     //log.debug "Handler: ${data.get('handler')}"
                     switch(handler) {
                         //update cases
@@ -184,8 +184,14 @@ def asyncResponse(response, data) {
                     //this means the Session ID is invalid, needs to login and try again
                     log.error "Command Type: ${data} failed with ResultCode: ${resultCode} and ResultData: ${resultData}"
                     log.debug "Attempting to refresh token and try again for method ${callback}"
-                    state.token = null
-                    login(callback)
+		    if(state.loginRetry == null || state.loginRetry == 0) {
+			state.loginRetry = 1;
+			state.token = null
+			login(callback)
+		    }
+		    else {
+			state.loginRetry = 0;    
+		    }
                     break
                 case "4101": //We are unable to connect to the security panel. Please try again later or contact support
                 case "4108": //Panel not connected with Virtual Keypad. Check Power/Communication failure
