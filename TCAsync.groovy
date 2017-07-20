@@ -251,20 +251,21 @@ def getAlarmStatus(response) {
 } //returns alarmCode
 
 def isTokenValid() {
-	//return false if token doesn't exist
+	def isValid = true
     if(state.token == null) {
-    	return false 
+    	isValid = false 
+    }
+    else {    
+        Long timeSinceRefresh = now() - (state.tokenRefresh != null ? state.tokenRefresh : 0)
+
+        //return false if time since refresh is over 4 minutes (likely timeout)       
+        if(timeSinceRefresh > 240000) {
+            state.token = null
+            isValid = false 
+        }
     }
     
-    Long timeSinceRefresh = now() - state.tokenRefresh
-    
-    //return false if time since refresh is over 4 minutes (likely timeout)       
-    if(timeSinceRefresh > 240000) {
-    	state.token = null
-    	return false 
-    }
-    
-    return true
+    return isValid
 } // This is a logical check only, assuming known timeout values and clearing token on loggout.  This method does no testing of the actua
 
 
@@ -278,6 +279,7 @@ def loginResponse(token, callback) {
     if(token != null) {
     	//log.debug "new token is ${token}"
         state.token = "${token}"
+        state.tokenRefresh = now()
     }
     
     switch(callback) {
