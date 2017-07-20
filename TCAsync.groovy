@@ -100,12 +100,6 @@ def tcCommandAsync(path, body, retry, callback) {
     	case "GetPanelMetaDataAndFullStatusEx":
         	handler = "panel"
             break
-        case "GetZonesListInStateEx":
-        	handler = "zone"
-            break
-        case "GetAllAutomationDeviceStatusEx":
-        	handler = "automation"
-            break
         case "AuthenticateUserLogin":
         	handler = "login"
             break
@@ -177,18 +171,9 @@ def asyncResponse(response, data) {
                         case "panel":
                             updateAlarmStatus(getAlarmStatus(response))
                             break
-                        //case "zone":
-                        //    state.zoneStatus = getZoneStatus(response)
-                        //    updateZoneStatuses()
-                        //    break
-                        //case "automation":
-                        //    state.switchStatus = getAutomationDeviceStatus(response)
-                        //    updateSwitchStatuses()
-                        //    break   
                         case "refresh":
                             refresh()
                             break
-                        //case "keepAlive":
                         default:
                             //if its not an update method or keepAlive we don't return anything
                             return
@@ -201,10 +186,6 @@ def asyncResponse(response, data) {
                     log.debug "Attempting to refresh token and try again for method ${callback}"
                     state.token = null
                     login(callback)
-                    //login(data.get('callback'))
-                    //settings.token = login().toString()
-                    //pause(1000) //pause should allow login to complete before trying again.
-                    //tcCommandAsync(data.get('path'), data.get('body')) //we don't send retry as 1 since it was a login failure
                     break
                 case "4101": //We are unable to connect to the security panel. Please try again later or contact support
                 case "4108": //Panel not connected with Virtual Keypad. Check Power/Communication failure
@@ -255,7 +236,6 @@ def updateAlarmStatus(alarmCode) {
             sendEvent(name: "status", value: "Armed Away", displayed: "true", description: "Refresh: Alarm is Armed Away")
         }
     }
-	//logout(token)
 	sendEvent(name: "refresh", value: "true", displayed: "true", description: "Refresh Successful") 
     state.alarmCode = alarmCode
 }
@@ -270,104 +250,6 @@ def getAlarmStatus(response) {
 	return alarmCode
 } //returns alarmCode
 
-/*
-Map getZoneStatus(response) {
-    String zoneID
-    String zoneStatus
-    def zoneMap = [:]
-	try {
-        response?.ZoneStatus.Zones.ZoneStatusInfoEx.each
-        {
-            ZoneStatusInfoEx ->
-                zoneID = ZoneStatusInfoEx.'@ZoneID'
-                zoneStatus = ZoneStatusInfoEx.'@ZoneStatus'
-                //bypassable = ZoneStatusInfoEx.'@CanBeBypassed' //0 means no, 1 means yes
-                zoneMap.put(zoneID, zoneStatus)
-        }//each Zone 
-
-        //log.debug "ZoneNumber: ZoneStatus " + zoneMap
-	} catch (e) {
-      	log.error("Error Occurred Updating Zones: " + e)
-	}// try/catch block
-	
-    if(zoneMap) {
-    	state.zoneStatusRefresh = now()
-    	return zoneMap
-    } else {
-    	return state.zoneStatus
-    }//if zoneMap is empty, return current state as a failsafe and don't update zoneStatusRefresh
-} //Should return zone information
-
-/*
-// Gets Automation Device Status
-Map getAutomationDeviceStatus(response) {
-	String switchID
-	String switchState
-    String switchType
-    String switchLevel
-    Map automationMap = [:]
-
-	try {
-        response.AutomationData.AutomationSwitch.SwitchInfo.each
-        {
-            SwitchInfo ->
-                switchID = SwitchInfo.SwitchID
-                switchState = SwitchInfo.SwitchState
-                //switchType = SwitchInfo.SwitchType
-                //switchLevel = SwitchInfo.SwitchLevel
-                automationMap.put(switchID,switchState)
-*/
-            /* Future format to store state information	(maybe store by TC-deviceId-switchId for ease of retrevial?)
-                if(switchType == "2") {
-                	automationMap[SwitchInfo.SwitchID] = [id: "${SwitchInfo.SwitchID}", switchType: "${SwitchInfo.SwitchType}", switchState: "${SwitchInfo.SwitchState}", switchLevel: "${SwitchInfo.SwitchLevel}"]
-                } else {
-                	automationMap[SwitchInfo.SwitchID] = [id: "${SwitchInfo.SwitchID}", switchType: "${SwitchInfo.SwitchType}", switchState: "${SwitchInfo.SwitchState}"]
-			*//*
-        }//SwitchInfo.each
-
-        //log.debug "SwitchID: SwitchState " + automationMap
-/*		
-		response.data.AutomationData.AutomationThermostat.ThermostatInfo.each
-        {
-            ThermostatInfo ->
-                automationMap[ThermostatInfo.ThermostatID] = [
-                    thermostatId: ThermostatInfo.ThermostatID,
-                    currentOpMode: ThermostatInfo.CurrentOpMode,
-                    thermostatMode: ThermostatInfo.ThermostatMode,
-                    thermostatFanMode: ThermostatInfo.ThermostatFanMode,
-                    heatSetPoint: ThermostatInfo.HeatSetPoint,
-                    coolSetPoint: ThermostatInfo.CoolSetPoint,
-                    energySaveHeatSetPoint: ThermostatInfo.EnergySaveHeatSetPoint,
-                    energySaveCoolSetPoint: ThermostatInfo.EnergySaveCoolSetPoint,
-                    temperatureScale: ThermostatInfo.TemperatureScale,
-                    currentTemperture: ThermostatInfo.CurrentTemperture,
-                    batteryState: ThermostatInfo.BatteryState]
-        }//ThermostatInfo.each
-*/
-    
-/*		
-		response.data.AutomationData.AutomationLock.LockInfo_Transitional.each
-        {
-            LockInfo_Transitional ->
-                automationMap[LockInfo_Transitional.LockID] = [
-                    lockID: LockInfo_Transitional.LockID,
-                    lockState: LockInfo_Transitional.LockState,
-                    batteryState: LockInfo_Transitional.BatteryState]                    ]
-        }//LockInfo_Transitional.each
-*/
-/*
-	} catch (e) {
-      	log.error("Error Occurred Updating Automation Devices: " + e)
-	}// try/catch block
-	
-    if(automationMap) {
-    	state.automationStatusRefresh = now()
-    	return automationMap
-    } else {
-    	return state.automationStatus
-    }//if automationMap is empty, return current state as a failsafe and don't update automationStatusRefresh
-} //Should return switch state information for all SwitchIDs
-*/
 def isTokenValid() {
 	//return false if token doesn't exist
     if(state.token == null) {
@@ -388,14 +270,7 @@ def isTokenValid() {
 
 // Login Function. Returns SessionID for rest of the functions
 def login(callback) {
-	//log.debug "Executed login"    
-	//def paramsLogin = [
-	//	uri: "https://rs.alarmnet.com/TC21API/TC2.asmx/AuthenticateUserLogin",
-	//	body: [userName: settings.userName , password: settings.password, ApplicationID: settings.applicationId, ApplicationVersion: settings.applicationVersion]
-	//]
-	//httpPost(paramsLogin) { responseLogin ->
-	//	token = responseLogin.data.SessionID 
-	//}
+	//log.debug "Executed login"
     tcCommandAsync("AuthenticateUserLogin",  [userName: settings.userName , password: settings.password, ApplicationID: settings.applicationId, ApplicationVersion: settings.applicationVersion], 0, callback)
 }
 
@@ -430,6 +305,9 @@ def loginResponse(token, callback) {
         case "disarm":
         	disarm()
         	break
+        case "disarmAuthenticated":
+        	disarmAuthenticated()
+            break
         default:
             return	
         break
@@ -502,7 +380,6 @@ def refresh() {
 
 def refreshAuthenticated() {
 	//log.debug "Doing refresh"
-	//httpPost(paramsArm) // Arming function in stay mode
 	getPanelMetadata() // Gets AlarmCode
 }
 
@@ -512,7 +389,7 @@ def lock() {
 	armAway()
 	sendEvent(name: "lock", value: "locked", displayed: "true", description: "Arming Away") 
 	sendEvent(name: "status", value: "Arming", displayed: "true", description: "Updating Status: Arming System")
-	//runIn(15,refresh)
+	runIn(15,refresh)
 }
 
 def unlock() {
@@ -520,7 +397,7 @@ def unlock() {
 	disarm()
 	sendEvent(name: "lock", value: "unlocked", displayed: "true", description: "Disarming") 
 	sendEvent(name: "status", value: "Disarming", displayed: "true", description: "Updating Status: Disarming System") 
-	//runIn(15,refresh)
+	runIn(15,refresh)
 }
 
 def on() {
@@ -528,7 +405,7 @@ def on() {
 	armStay()
 	sendEvent(name: "switch", value: "on", displayed: "true", description: "Arming Stay") 
 	sendEvent(name: "status", value: "Arming", displayed: "true", description: "Updating Status: Arming System") 
-	//runIn(15,refresh)
+	runIn(15,refresh)
 }
 
 def off() {
@@ -536,5 +413,5 @@ def off() {
 	disarm()
 	sendEvent(name: "switch", value: "off", displayed: "true", description: "Disarming") 
 	sendEvent(name: "status", value: "Disarmed", displayed: "true", description: "Updating Status: Disarming System") 
-	//runIn(15,refresh)
+	runIn(15,refresh)
 }
