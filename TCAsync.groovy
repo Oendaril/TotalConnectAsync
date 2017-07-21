@@ -150,16 +150,20 @@ def asyncResponse(response, data) {
  	//log.debug "data:  ${data}"
     try {    
     	def handler = data.get('handler')
-        def callback = data.get('callback')        
+        def callback = data.get('callback')
+        def resultCode = response.ResultCode
+        def resultData = response.ResultData
         
-        if(handler == "login") {            
-            loginResponse(response.SessionID, callback)
+        if(handler == "login") {
+            if(resultCode == "0") {
+            	loginResponse(response.SessionID, callback)
+            }
+            else {
+                log.error "Command Type: ${data} failed with ResultCode: ${resultCode} and ResultData: ${resultData}"
+            }
         }
         else {
             //validate response
-            def resultCode = response.ResultCode
-            def resultData = response.ResultData
-
             switch(resultCode) {
                 case "0": //Successful Command
                 case "4500": //Successful Command for Arm Action
