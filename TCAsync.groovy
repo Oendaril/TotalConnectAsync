@@ -75,7 +75,7 @@ metadata {
 	}
 }
 
-def tcCommandAsync(path, body, retry, callback) {
+def tcCommandAsync(path, body, retry, source, callback) {
 	String stringBody = ""
     
     body.each { k, v ->
@@ -92,30 +92,12 @@ def tcCommandAsync(path, body, retry, callback) {
     	body: stringBody,
         requestContentType: "application/x-www-form-urlencoded",
         contentType: "application/xml"
-    ]
-    
-    def handler
-        
-    switch(path) {
-    	case "GetPanelMetaDataAndFullStatusEx":
-        	handler = "panel"
-            break
-        case "AuthenticateUserLogin":
-        	handler = "login"
-            break
-        case "ArmSecuritySystem":
-        case "DisarmSecuritySystem":
-        	handler = "refresh"
-            break
-        default:
-        	handler = "none"
-            break
-    }//define handler based on method called
+    ]   
     
     def data = [
     	path: path,
         body: stringBody,
-        handler: handler,
+        source: source,
         callback: callback,
         retry: retry
     ] //Data for Async Command.  Params to retry, handler to handle, and retry count if needed
@@ -149,16 +131,20 @@ def asyncResponse(response, data) {
     response = response.getXml()
  	//log.debug "data:  ${data}"
     try {    
-    	def handler = data.get('handler')
+        def source = data.get('source')
         def callback = data.get('callback')
+        def retry = data.get('retry')
+        def path = data.get('path')
+        
         def resultCode = response.ResultCode
         def resultData = response.ResultData
         
-        if(handler == "login") {
+        if(source == "login") {
             if(resultCode == "0") {
             	loginResponse(response.SessionID, callback)
             }
             else {
+            	//Don't retry logins, as that just means something is bad with the credentials itself
                 log.error "Command Type: ${data} failed with ResultCode: ${resultCode} and ResultData: ${resultData}"
             }
         }
@@ -168,34 +154,30 @@ def asyncResponse(response, data) {
                 case "0": //Successful Command
                 case "4500": //Successful Command for Arm Action
                     state.tokenRefresh = now() //we ran a successful command, that will keep the token alive
-		    state.loginRetry = 0
-                    //log.debug "Handler: ${data.get('handler')}"
-                    switch(handler) {
-                        //update cases
-                        case "panel":
+                	//update cases, this is used for synchronous parsing of response data only. Async callbacks are used in callback param
+                    switch(source) {
+                        case "getPanelMetadata":
                             updateAlarmStatus(getAlarmStatus(response))
-                            break
-                        case "refresh":
-                            refresh()
                             break
                         default:
                             //if its not an update method or keepAlive we don't return anything
                             return
                             break
                     }//switch(data)
+                    
+                    if(callback != null) {
+                    	handleCallback(callback)
+                    }
                     break
                 case "-102":
                     //this means the Session ID is invalid, needs to login and try again
                     log.error "Command Type: ${data} failed with ResultCode: ${resultCode} and ResultData: ${resultData}"
                     log.debug "Attempting to refresh token and try again for method ${callback}"
-		    if(state.loginRetry == null || state.loginRetry == 0) {
-			state.loginRetry = 1;
-			state.token = null
-			login(callback)
-		    }
-		    else {
-			state.loginRetry = 0;    
-		    }
+                    if(retry == 0) {                        
+                        state.token = null
+                        retry+=1
+                        login(source, retry)
+                    }
                     break
                 case "4101": //We are unable to connect to the security panel. Please try again later or contact support
                 case "4108": //Panel not connected with Virtual Keypad. Check Power/Communication failure
@@ -203,26 +185,12 @@ def asyncResponse(response, data) {
                 case "-4108": //Cannot establish a connection at this time. Please contact your Security Professional if the problem persists.
                 default: //Other Errors 
                     log.error "Command Type: ${data} failed with ResultCode: ${resultCode} and ResultData: ${resultData}"
-                    /* Retry causes goofy issues...		
-                        if(retry == 0) {
-                            pause(2000) //pause 2 seconds (otherwise this hits our rate limit)
-                            retry += 1
-                            tcCommandAsync(data.get('path'), data.get('body'), retry)
-                        }//retry after 3 seconds if we haven't retried before
-                    */      
                     break
             }//switch
         }
 	} catch (SocketTimeoutException e) {
         //identify a timeout and retry?
 		log.error "Timeout Error: $e"
-	/* Retry causes goofy issues...		
-        if(retry == 0) {
-        	pause(2000) //pause 2 seconds (otherwise this hits our rate limit)
-           	retry += 1
-            tcCommandAsync(data.get('path'), data.get('body'), retry)
-		}//retry after 5 seconds if we haven't retried before
-	*/
     } catch (e) {
     	log.error "Something unexpected went wrong in asyncResponse: $e"
 	}//try / catch for httpPost
@@ -279,10 +247,9 @@ def isTokenValid() {
 } // This is a logical check only, assuming known timeout values and clearing token on loggout.  This method does no testing of the actua
 
 
-// Login Function. Returns SessionID for rest of the functions
-def login(callback) {
+def login(callback, retry) {
 	//log.debug "Executed login"
-    tcCommandAsync("AuthenticateUserLogin",  [userName: settings.userName , password: settings.password, ApplicationID: settings.applicationId, ApplicationVersion: settings.applicationVersion], 0, callback)
+    tcCommandAsync("AuthenticateUserLogin",  [userName: settings.userName , password: settings.password, ApplicationID: settings.applicationId, ApplicationVersion: settings.applicationVersion], retry != null ? retry : 0, "login", callback)
 }
 
 def loginResponse(token, callback) {                                  
@@ -292,6 +259,66 @@ def loginResponse(token, callback) {
         state.tokenRefresh = now()
     }
     
+    handleCallback(callback); 
+}
+
+def logout() {
+    tcCommandAsync("Logout",  [SessionID: state.token], 0, "logout", null)
+}
+
+// Gets Panel Metadata. Takes token & location ID as an argument
+def getPanelMetadata() {
+	tcCommandAsync("GetPanelMetaDataAndFullStatusEx", [SessionID: state.token, LocationID: settings.locationId, LastSequenceNumber: 0, LastUpdatedTimestampTicks: 0, PartitionID: 1], 0, "getPanelMetadata", null) //This updates panel status
+}
+
+// Arm Function. Performs arming function
+def armAway() {		   
+	if(isTokenValid())
+    	armAwayAuthenticated()
+    else {
+		login(armAwayAuthenticated, 0)
+    }
+}
+
+def armAwayAuthenticated() {
+	tcCommandAsync("ArmSecuritySystem", [SessionID: state.token, LocationID: settings.locationId, DeviceID: settings.deviceId, ArmType: 0, UserCode: '-1'], 0 , "armAway", null)	
+}
+
+def armStay() {		   
+	if(isTokenValid())
+    	armStayAuthenticated()
+    else {
+		login(armStayAuthenticated, 0)
+    }
+}
+
+def armStayAuthenticated() {		
+	tcCommandAsync("ArmSecuritySystem", [SessionID: state.token, LocationID: settings.locationId, DeviceID: settings.deviceId, ArmType: 1, UserCode: '-1'], 0, "armStay", null)
+}
+
+def disarm() {		   
+	if(isTokenValid())
+    	disarmAuthenticated()
+    else {
+		login(disarmAuthenticated, 0)
+    }
+}
+
+def disarmAuthenticated() {
+	tcCommandAsync("DisarmSecuritySystem", [SessionID: state.token, LocationID: settings.locationId, DeviceID: settings.deviceId, UserCode: '-1'], 0, "disarm", null)
+}
+
+def refresh() {		   
+	//log.debug "is token not null? ${state.token != null} and is token here? ${state.token}"
+	if(isTokenValid()) {
+    	getPanelMetadata()
+    }
+    else {
+    	login(getPanelMetadata, 0)
+    }
+}
+
+def handleCallback(callback) {
     switch(callback) {
         case "refresh":
         	refresh()
@@ -326,82 +353,13 @@ def loginResponse(token, callback) {
     }
 }
 
-// Logout Function. Called after every mutational command. Ensures the current user is always logged Out.
-def logout(token) {
-	//log.debug "During logout - ${token}"
-	//def paramsLogout = [
-	//	uri: "https://rs.alarmnet.com/TC21API/TC2.asmx/Logout",
-	//	body: [SessionID: token]
-	//]
-	//httpPost(paramsLogout) { responseLogout ->
-	//	log.debug "Smart Things has successfully logged out"
-	//}  
-}
-
-// Gets Panel Metadata. Takes token & location ID as an argument
-def getPanelMetadata() {
-	tcCommandAsync("GetPanelMetaDataAndFullStatusEx", [SessionID: state.token, LocationID: settings.locationId, LastSequenceNumber: 0, LastUpdatedTimestampTicks: 0, PartitionID: 1], 0, "getPanelMetadata") //This updates panel status
-}
-
-// Arm Function. Performs arming function
-def armAway() {		   
-	if(isTokenValid())
-    	armAwayAuthenticated()
-    else {
-		login(armAwayAuthenticated)
-    }
-}
-
-def armAwayAuthenticated() {
-	tcCommandAsync("ArmSecuritySystem", [SessionID: state.token, LocationID: settings.locationId, DeviceID: settings.deviceId, ArmType: 0, UserCode: '-1'], 0 , "armAway")	
-}
-
-def armStay() {		   
-	if(isTokenValid())
-    	armStayAuthenticated()
-    else {
-		login(armStayAuthenticated)
-    }
-}
-
-def armStayAuthenticated() {		
-	tcCommandAsync("ArmSecuritySystem", [SessionID: state.token, LocationID: settings.locationId, DeviceID: settings.deviceId, ArmType: 1, UserCode: '-1'], 0, "armStay")
-}
-
-def disarm() {		   
-	if(isTokenValid())
-    	disarmAuthenticated()
-    else {
-		login(disarmAuthenticated)
-    }
-}
-
-def disarmAuthenticated() {
-	tcCommandAsync("DisarmSecuritySystem", [SessionID: state.token, LocationID: settings.locationId, DeviceID: settings.deviceId, UserCode: '-1'], 0, "disarm")
-}
-
-def refresh() {		   
-	//log.debug "is token not null? ${state.token != null} and is token here? ${state.token}"
-	if(isTokenValid()) {
-    	refreshAuthenticated()
-    }
-    else {
-    	login(refreshAuthenticated)
-    }
-}
-
-def refreshAuthenticated() {
-	//log.debug "Doing refresh"
-	getPanelMetadata() // Gets AlarmCode
-}
-
 // handle commands
 def lock() {
 	//log.debug "Executing 'Arm Away'"
 	armAway()
 	sendEvent(name: "lock", value: "locked", displayed: "true", description: "Arming Away") 
 	sendEvent(name: "status", value: "Arming", displayed: "true", description: "Updating Status: Arming System")
-	runIn(15,refresh)
+	runIn(60,refresh)
 }
 
 def unlock() {
@@ -409,7 +367,7 @@ def unlock() {
 	disarm()
 	sendEvent(name: "lock", value: "unlocked", displayed: "true", description: "Disarming") 
 	sendEvent(name: "status", value: "Disarming", displayed: "true", description: "Updating Status: Disarming System") 
-	runIn(15,refresh)
+	runIn(60,refresh)
 }
 
 def on() {
@@ -417,7 +375,7 @@ def on() {
 	armStay()
 	sendEvent(name: "switch", value: "on", displayed: "true", description: "Arming Stay") 
 	sendEvent(name: "status", value: "Arming", displayed: "true", description: "Updating Status: Arming System") 
-	runIn(15,refresh)
+	runIn(60,refresh)
 }
 
 def off() {
@@ -425,5 +383,5 @@ def off() {
 	disarm()
 	sendEvent(name: "switch", value: "off", displayed: "true", description: "Disarming") 
 	sendEvent(name: "status", value: "Disarmed", displayed: "true", description: "Updating Status: Disarming System") 
-	runIn(15,refresh)
+	runIn(60,refresh)
 }
