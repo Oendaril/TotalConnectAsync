@@ -189,12 +189,13 @@ def asyncResponse(response, data) {
                     log.error "Command Type: ${data} failed with ResultCode: ${resultCode} and ResultData: ${resultData}"
                     log.debug "Attempting to refresh token and try again for method ${callback}"
 		    if(state.loginRetry == null || state.loginRetry == 0) {
-			state.loginRetry = 1;
+			state.loginRetry = 1
 			state.token = null
+		        pause(2000)
 			login(callback)
 		    }
 		    else {
-			state.loginRetry = 0;    
+			state.loginRetry = 0
 		    }
                     break
                 case "4101": //We are unable to connect to the security panel. Please try again later or contact support
