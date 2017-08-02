@@ -191,7 +191,7 @@ def asyncResponse(response, data) {
 		    if(state.loginRetry == null || state.loginRetry == 0) {
 			state.loginRetry = 1
 			state.token = null
-		        pause(2000)
+		        //pause(2000)
 			login(callback)
 		    }
 		    else {
